@@ -1,4 +1,4 @@
-# Version 2025-08-03
+# Version 2025-08-21
 import re
 import os
 import subprocess
@@ -7,7 +7,7 @@ def clean_and_convert_to_latex(input_md_filename):
     """
     A full pipeline script that:
     1. Cleans a Notion-exported Markdown file.
-    2. Asks the user to select a LaTeX template.
+    2. Asks the user to select a LaTeX conversion mode/template.
     3. Converts the cleaned Markdown to a .tex file using Pandoc.
 
     All files are expected to be in the same directory as this script.
@@ -42,39 +42,28 @@ def clean_and_convert_to_latex(input_md_filename):
     # 1.1. Skip the first line if it's a redundant title
     content_lines = lines[1:] if lines[0].startswith('# ') else lines
 
-    # --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
-    # 1.2. [FIXED] Remove duplicate image captions, accounting for blank lines
-    # --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
+    # 1.2. Remove duplicate image captions, accounting for blank lines
     cleaned_lines = []
     i = 0
     while i < len(content_lines):
         current_line = content_lines[i]
         image_match = re.match(r'^\s*!\[(.*)\]\(.*\)\s*$', current_line)
 
-        # Check for an image with a non-empty caption
         if image_match and image_match.group(1).strip():
             alt_text = image_match.group(1).strip()
             
-            # Find the index of the next non-empty line
             next_line_index = i + 1
             while next_line_index < len(content_lines) and not content_lines[next_line_index].strip():
-                next_line_index += 1 # Skip any blank lines
+                next_line_index += 1
             
-            # If we found a non-empty line and its content matches the caption...
             if next_line_index < len(content_lines) and content_lines[next_line_index].strip() == alt_text:
-                # Keep the image line itself.
                 cleaned_lines.append(current_line)
-                # Add any blank lines that were between the image and the duplicate text.
-                # This preserves formatting.
                 cleaned_lines.extend(content_lines[i + 1:next_line_index])
-                # And finally, skip the duplicate line by jumping the index past it.
                 i = next_line_index + 1
                 continue
 
-        # Default case: The line is not an image with a duplicate caption.
         cleaned_lines.append(current_line)
         i += 1
-    # --- --- --- End of fix --- --- --- ---
 
     # 1.3. Ask user if they want to remove bold formatting from headings
     print("\n--- Optional Cleaning Step ---")
@@ -103,34 +92,35 @@ def clean_and_convert_to_latex(input_md_filename):
         print(f"Error writing cleaned file: {e}")
         return
 
-    # --- --- --- --- --- ---
-    # Step 2: Select a LaTeX Template
-    # --- --- --- --- --- ---
-    print("\n--- Step 2: Select a LaTeX Template ---")
+    # --- --- --- --- --- --- --- --- --- --- ---
+    # Step 2: Select Conversion Mode & Template
+    # --- --- --- --- --- --- --- --- --- --- ---
+    print("\n--- Step 2: Select Conversion Mode & Template ---")
     
-    templates = [
+    custom_templates = [
         "Philips-Pandoc-LaTeX-Vorlage_WK1-Format.tex",
         "Philips-Pandoc-LaTeX-Vorlage-mit-Vorwort-und-Disclaimer.tex",
+        "Philips-Pandoc-LaTeX-Vorlage-mit-Vorwort-und-Disclaimer_erweitert.tex",
         "Philips-Pandoc-LaTeX-Vorlage.tex"
     ]
 
-    print("Please choose a template for the Pandoc conversion:")
-    for i, t in enumerate(templates):
-        print(f"  {i+1}: {t}")
+    # Combine custom templates with generic options for the menu
+    menu_options = custom_templates + [
+        "Standard Pandoc Template (creates a full .tex file with --standalone)",
+        "LaTeX Fragment (converts only the document body, no preamble)"
+    ]
 
-    chosen_template_path = None
-    while not chosen_template_path:
+    print("Please choose a conversion option:")
+    for i, option_desc in enumerate(menu_options):
+        print(f"  {i+1}: {option_desc}")
+
+    user_choice = 0
+    while not (1 <= user_choice <= len(menu_options)):
         try:
-            choice = int(input("Enter the number of your choice: "))
-            if 1 <= choice <= len(templates):
-                chosen_template_filename = templates[choice - 1]
-                chosen_template_path = os.path.join(script_dir, chosen_template_filename)
-                
-                if not os.path.exists(chosen_template_path):
-                    print(f"\nError: Template file not found at '{chosen_template_path}'")
-                    chosen_template_path = None
-            else:
-                print(f"Invalid number. Please enter a number between 1 and {len(templates)}.")
+            choice_str = input(f"Enter the number of your choice (1-{len(menu_options)}): ")
+            user_choice = int(choice_str)
+            if not (1 <= user_choice <= len(menu_options)):
+                print("Invalid number. Please try again.")
         except ValueError:
             print("Invalid input. Please enter a number.")
 
@@ -141,12 +131,34 @@ def clean_and_convert_to_latex(input_md_filename):
     output_tex_filename = f"{base_name}.tex"
     output_tex_file_path = os.path.join(script_dir, output_tex_filename)
     
+    # Base command
     command = [
         'pandoc',
         cleaned_md_file_path,
-        '-o', output_tex_file_path,
-        '--template', chosen_template_path
+        '-o', output_tex_file_path
     ]
+
+    # Add flags based on user's choice
+    num_custom_templates = len(custom_templates)
+    
+    if 1 <= user_choice <= num_custom_templates:
+        # Option is a custom template
+        chosen_template_filename = custom_templates[user_choice - 1]
+        chosen_template_path = os.path.join(script_dir, chosen_template_filename)
+        
+        if not os.path.exists(chosen_template_path):
+            print(f"\nError: Template file not found at '{chosen_template_path}'")
+            return
+        
+        command.extend(['--template', chosen_template_path])
+
+    elif user_choice == num_custom_templates + 1:
+        # Option is the standard pandoc template
+        command.append('--standalone')
+        
+    elif user_choice == num_custom_templates + 2:
+        # Option is a fragment, no additional flags needed
+        pass
 
     print(f"Running command: {' '.join(command)}")
 
@@ -174,5 +186,4 @@ def clean_and_convert_to_latex(input_md_filename):
 #    .tex template files are in the SAME DIRECTORY as the script.
 # 3. Run the script from your terminal: python3 notion2latex.py
 if __name__ == "__main__":
-    # The script will now look for the input file in its own directory.
     clean_and_convert_to_latex('input.md')
